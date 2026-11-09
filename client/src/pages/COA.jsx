@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   getCOA,
   addCOA,
   updateCOA,
   deleteCOA,
+  importCOA,
 } from "../api/api";
 
 function COA() {
@@ -16,6 +17,9 @@ function COA() {
   const [deskripsi, setDeskripsi] = useState("");
   const [status, setStatus] = useState(1);
   const [error, setError] = useState("");
+  
+  // Ref untuk menghubungkan tombol kustom ke input file tersembunyi
+  const fileInputRef = useRef(null);
 
   async function loadData() {
     try {
@@ -103,6 +107,33 @@ function COA() {
     }
   }
 
+  // Fungsi untuk menangani proses upload file Excel & refresh data otomatis
+  async function handleFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validasi ekstensi file
+    if (!file.name.match(/\.(xlsx|xls|csv)$/)) {
+      alert("Format file tidak didukung. Harap unggah file Excel (.xlsx/.xls) atau CSV.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setLoading(true);
+      await importCOA(formData);
+      alert("Berhasil mengimpor data Excel!");
+      await loadData(); // Memuat ulang data agar tabel langsung ter-update
+    } catch (err) {
+      alert("Gagal mengimpor file Excel. Periksa kembali format file atau backend.");
+    } finally {
+      setLoading(false);
+      e.target.value = ""; // Reset input file
+    }
+  }
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
@@ -155,9 +186,31 @@ function COA() {
               <p>Kelola data kebutuhan untuk penyelenggaraan acara.</p>
             </div>
 
-            <button className="add-button" onClick={openAddModal}>
-              <span>+</span> Tambah COA
-            </button>
+            {/* Tombol Aksi di Kanan (Import Excel & Tambah COA) */}
+            <div style={{ display: "flex", gap: "10px" }}>
+              {/* Input file tersembunyi */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: "none" }}
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileChange}
+              />
+
+              {/* Tombol Import Excel */}
+              <button
+                className="add-button"
+                style={{ backgroundColor: "#107c41" }}
+                onClick={() => fileInputRef.current.click()}
+              >
+                <span>📊</span> Import Excel
+              </button>
+
+              {/* Tombol Tambah COA */}
+              <button className="add-button" onClick={openAddModal}>
+                <span>+</span> Tambah COA
+              </button>
+            </div>
           </div>
 
           <div className="summary-card">
