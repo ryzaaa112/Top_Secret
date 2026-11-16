@@ -9,10 +9,46 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Konfigurasi Multer untuk menangani file upload
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
 
-// GET: mengambil semua data COA
+function cleanText(value) {
+  return value === undefined || value === null
+    ? ""
+    : String(value).trim();
+}
+
+function validateCOA(body) {
+  const kode_coa = cleanText(body.kode_coa);
+  const nama_coa = cleanText(body.nama_coa);
+  const kategori_akun = cleanText(body.kategori_akun);
+  const sub_kategori_akun = cleanText(body.sub_kategori_akun);
+
+  if (
+    !kode_coa ||
+    !nama_coa ||
+    !kategori_akun ||
+    !sub_kategori_akun
+  ) {
+    return {
+      error: "Semua kolom COA wajib diisi.",
+    };
+  }
+
+  return {
+    value: {
+      kode_coa,
+      nama_coa,
+      kategori_akun,
+      sub_kategori_akun,
+      deskripsi: cleanText(body.deskripsi),
+      status: body.status === undefined ? 1 : Number(body.status),
+    },
+  };
+}
+
+// GET: mengambil seluruh data COA
 app.get("/api/coa", (req, res) => {
   try {
     const data = db
@@ -21,32 +57,57 @@ app.get("/api/coa", (req, res) => {
 
     res.json(data);
   } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil data COA" });
+    console.error(error);
+    res.status(500).json({
+      message: "Gagal mengambil data COA",
+    });
   }
 });
 
 // POST: menambahkan COA
 app.post("/api/coa", (req, res) => {
   try {
-    const { nama_coa, deskripsi } = req.body;
+    const validated = validateCOA(req.body);
 
-    if (!nama_coa || !nama_coa.trim()) {
+    if (validated.error) {
       return res.status(400).json({
-        message: "Nama COA wajib diisi",
+        message: validated.error,
       });
     }
 
-    const result = db
-      .prepare(`
-        INSERT INTO master_coa (nama_coa, deskripsi)
-        VALUES (?, ?)
-      `)
-      .run(nama_coa.trim(), deskripsi || "");
+    const {
+      kode_coa,
+      nama_coa,
+      kategori_akun,
+      sub_kategori_akun,
+      deskripsi,
+      status,
+    } = validated.value;
 
-    const kode = `COA-${String(result.lastInsertRowid).padStart(4, "0")}`;
+    if (![0, 1].includes(status)) {
+      return res.status(400).json({
+        message: "Status tidak valid.",
+      });
+    }
 
-    db.prepare("UPDATE master_coa SET kode_coa = ? WHERE id = ?")
-      .run(kode, result.lastInsertRowid);
+    const result = db.prepare(`
+      INSERT INTO master_coa (
+        kode_coa,
+        nama_coa,
+        kategori_akun,
+        sub_kategori_akun,
+        deskripsi,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      kode_coa,
+      nama_coa,
+      kategori_akun,
+      sub_kategori_akun,
+      deskripsi,
+      status
+    );
 
     const data = db
       .prepare("SELECT * FROM master_coa WHERE id = ?")
@@ -54,7 +115,17 @@ app.post("/api/coa", (req, res) => {
 
     res.status(201).json(data);
   } catch (error) {
-    res.status(500).json({ message: "Gagal menambahkan COA" });
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      return res.status(409).json({
+        message: "Kode COA sudah digunakan. Masukkan kode lain.",
+      });
+    }
+
+    console.error(error);
+
+    res.status(500).json({
+      message: "Gagal menambahkan COA",
+    });
   }
 });
 
@@ -62,78 +133,179 @@ app.post("/api/coa", (req, res) => {
 app.post("/api/coa/import", upload.single("file"), (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: "Tidak ada file yang diunggah" });
+      return res.status(400).json({
+        message: "Tidak ada file yang diunggah",
+      });
     }
 
-    const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+    const workbook = xlsx.read(req.file.buffer, {
+      type: "buffer",
+    });
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = xlsx.utils.sheet_to_json(sheet);
 
     if (rows.length === 0) {
-      return res.status(400).json({ message: "File Excel kosong atau format tidak sesuai" });
+      return res.status(400).json({
+        message: "File Excel kosong atau format tidak sesuai",
+      });
     }
 
     const insertStmt = db.prepare(`
-      INSERT INTO master_coa (nama_coa, deskripsi, status)
-      VALUES (?, ?, ?)
+      INSERT INTO master_coa (
+        kode_coa,
+        nama_coa,
+        kategori_akun,
+        sub_kategori_akun,
+        deskripsi,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
-    const updateKodeStmt = db.prepare(`
-      UPDATE master_coa SET kode_coa = ? WHERE id = ?
-    `);
+    const imported = db.transaction((dataRows) => {
+      let count = 0;
 
-    const insertMany = db.transaction((dataRows) => {
-      for (const row0 of dataRows) {
+      for (const originalRow of dataRows) {
         const row = {};
-        Object.keys(row0).forEach((k) => {
-          row[k.trim().toLowerCase()] = row0[k];
+
+        Object.keys(originalRow).forEach((key) => {
+          row[key.trim().toLowerCase()] = originalRow[key];
         });
 
-        // Menyesuaikan dengan kolom yang ada di file Excel Anda
-        const nama_coa = row["nama akun"] || row.nama_coa || row.nama || row.name;
-        const deskripsi = row["keterangan / dasar pemetaan"] || row.deskripsi || row.description || "";
-        const status = row.status !== undefined ? Number(row.status) : 1;
+        const kode_coa = cleanText(
+          row["kode coa"] ?? row.kode_coa
+        );
 
-        if (nama_coa) {
-          const result = insertStmt.run(String(nama_coa).trim(), String(deskripsi), status);
-          const kode = `COA-${String(result.lastInsertRowid).padStart(4, "0")}`;
-          updateKodeStmt.run(kode, result.lastInsertRowid);
+        const nama_coa = cleanText(
+          row["nama coa"] ??
+          row["nama akun"] ??
+          row.nama_coa ??
+          row.nama
+        );
+
+        const kategori_akun = cleanText(
+          row["kategori akun"] ?? row.kategori_akun
+        );
+
+        const sub_kategori_akun = cleanText(
+          row["sub kategori akun"] ??
+          row["subkategori akun"] ??
+          row.sub_kategori_akun
+        );
+
+        const deskripsi = cleanText(
+          row["deskripsi"] ??
+          row["keterangan / dasar pemetaan"] ??
+          row.deskripsi
+        );
+
+        const status = row.status === undefined
+          ? 1
+          : Number(row.status);
+
+        if (
+          !kode_coa ||
+          !nama_coa ||
+          !kategori_akun ||
+          !sub_kategori_akun
+        ) {
+          throw new Error(
+            "Setiap baris wajib memiliki Kode COA, Nama COA, Kategori Akun, dan Sub Kategori Akun."
+          );
         }
+
+        if (![0, 1].includes(status)) {
+          throw new Error(
+            `Status COA ${kode_coa} harus 0 atau 1.`
+          );
+        }
+
+        insertStmt.run(
+          kode_coa,
+          nama_coa,
+          kategori_akun,
+          sub_kategori_akun,
+          deskripsi,
+          status
+        );
+
+        count++;
       }
+
+      return count;
     });
 
-    insertMany(rows);
+    const count = imported(rows);
 
-    res.json({ message: "Data COA berhasil diimpor!" });
+    res.json({
+      message: `${count} data COA berhasil diimpor.`,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Gagal memproses file Excel" });
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      return res.status(409).json({
+        message: "Import dibatalkan karena ada Kode COA yang sudah digunakan.",
+      });
+    }
+
+    res.status(400).json({
+      message: error.message || "Gagal memproses file Excel",
+    });
   }
 });
 
 // PUT: mengedit COA
 app.put("/api/coa/:id", (req, res) => {
   try {
-    const { nama_coa, deskripsi, status } = req.body;
-    const id = Number(req.params.id);
+    const validated = validateCOA(req.body);
 
-    if (!nama_coa || !nama_coa.trim()) {
+    if (validated.error) {
       return res.status(400).json({
-        message: "Nama COA wajib diisi",
+        message: validated.error,
       });
     }
 
-    const result = db
-      .prepare(`
-        UPDATE master_coa
-        SET nama_coa = ?, deskripsi = ?, status = ?
-        WHERE id = ?
-      `)
-      .run(nama_coa.trim(), deskripsi || "", status, id);
+    const {
+      kode_coa,
+      nama_coa,
+      kategori_akun,
+      sub_kategori_akun,
+      deskripsi,
+      status,
+    } = validated.value;
+
+    if (![0, 1].includes(status)) {
+      return res.status(400).json({
+        message: "Status tidak valid.",
+      });
+    }
+
+    const id = Number(req.params.id);
+
+    const result = db.prepare(`
+      UPDATE master_coa
+      SET
+        kode_coa = ?,
+        nama_coa = ?,
+        kategori_akun = ?,
+        sub_kategori_akun = ?,
+        deskripsi = ?,
+        status = ?
+      WHERE id = ?
+    `).run(
+      kode_coa,
+      nama_coa,
+      kategori_akun,
+      sub_kategori_akun,
+      deskripsi,
+      status,
+      id
+    );
 
     if (result.changes === 0) {
-      return res.status(404).json({ message: "COA tidak ditemukan" });
+      return res.status(404).json({
+        message: "COA tidak ditemukan",
+      });
     }
 
     const data = db
@@ -142,7 +314,17 @@ app.put("/api/coa/:id", (req, res) => {
 
     res.json(data);
   } catch (error) {
-    res.status(500).json({ message: "Gagal mengedit COA" });
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      return res.status(409).json({
+        message: "Kode COA sudah digunakan. Masukkan kode lain.",
+      });
+    }
+
+    console.error(error);
+
+    res.status(500).json({
+      message: "Gagal mengedit COA",
+    });
   }
 });
 
@@ -154,12 +336,18 @@ app.delete("/api/coa/:id", (req, res) => {
       .run(Number(req.params.id));
 
     if (result.changes === 0) {
-      return res.status(404).json({ message: "COA tidak ditemukan" });
+      return res.status(404).json({
+        message: "COA tidak ditemukan",
+      });
     }
 
-    res.json({ message: "COA berhasil dihapus" });
+    res.json({
+      message: "COA berhasil dihapus",
+    });
   } catch (error) {
-    res.status(500).json({ message: "Gagal menghapus COA" });
+    res.status(500).json({
+      message: "Gagal menghapus COA",
+    });
   }
 });
 

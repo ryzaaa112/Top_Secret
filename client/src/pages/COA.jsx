@@ -13,12 +13,16 @@ function COA() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState(null);
+
+  const [kode, setKode] = useState("");
   const [nama, setNama] = useState("");
+  const [kategoriAkun, setKategoriAkun] = useState("");
+  const [subKategoriAkun, setSubKategoriAkun] = useState("");
   const [deskripsi, setDeskripsi] = useState("");
   const [status, setStatus] = useState(1);
+
   const [error, setError] = useState("");
-  
-  // Ref untuk menghubungkan tombol kustom ke input file tersembunyi
+
   const fileInputRef = useRef(null);
 
   async function loadData() {
@@ -41,16 +45,24 @@ function COA() {
   const filteredData = useMemo(() => {
     const keyword = search.toLowerCase();
 
-    return data.filter(
-      (item) =>
-        item.kode_coa.toLowerCase().includes(keyword) ||
-        item.nama_coa.toLowerCase().includes(keyword)
+    return data.filter((item) =>
+      [
+        item.kode_coa,
+        item.nama_coa,
+        item.kategori_akun,
+        item.sub_kategori_akun,
+      ].some((value) =>
+        (value || "").toLowerCase().includes(keyword)
+      )
     );
   }, [data, search]);
 
   function openAddModal() {
     setEditId(null);
+    setKode("");
     setNama("");
+    setKategoriAkun("");
+    setSubKategoriAkun("");
     setDeskripsi("");
     setStatus(1);
     setModalOpen(true);
@@ -58,7 +70,10 @@ function COA() {
 
   function openEditModal(item) {
     setEditId(item.id);
-    setNama(item.nama_coa);
+    setKode(item.kode_coa || "");
+    setNama(item.nama_coa || "");
+    setKategoriAkun(item.kategori_akun || "");
+    setSubKategoriAkun(item.sub_kategori_akun || "");
     setDeskripsi(item.deskripsi || "");
     setStatus(item.status);
     setModalOpen(true);
@@ -67,18 +82,26 @@ function COA() {
   async function handleSubmit(e) {
     e.preventDefault();
 
-    if (!nama.trim()) {
-      alert("Nama COA wajib diisi.");
+    if (
+      !kode.trim() ||
+      !nama.trim() ||
+      !kategoriAkun.trim() ||
+      !subKategoriAkun.trim()
+    ) {
+      alert("Semua kolom wajib diisi.");
       return;
     }
 
-    try {
-      const payload = {
-        nama_coa: nama,
-        deskripsi,
-        status,
-      };
+    const payload = {
+      kode_coa: kode.trim(),
+      nama_coa: nama.trim(),
+      kategori_akun: kategoriAkun.trim(),
+      sub_kategori_akun: subKategoriAkun.trim(),
+      deskripsi: deskripsi.trim(),
+      status,
+    };
 
+    try {
       if (editId) {
         await updateCOA(editId, payload);
       } else {
@@ -87,8 +110,8 @@ function COA() {
 
       setModalOpen(false);
       await loadData();
-    } catch {
-      alert("Terjadi kesalahan saat menyimpan COA.");
+    } catch (err) {
+      alert(err.message || "Terjadi kesalahan saat menyimpan COA.");
     }
   }
 
@@ -107,14 +130,13 @@ function COA() {
     }
   }
 
-  // Fungsi untuk menangani proses upload file Excel & refresh data otomatis
   async function handleFileChange(e) {
     const file = e.target.files[0];
+
     if (!file) return;
 
-    // Validasi ekstensi file
-    if (!file.name.match(/\.(xlsx|xls|csv)$/)) {
-      alert("Format file tidak didukung. Harap unggah file Excel (.xlsx/.xls) atau CSV.");
+    if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
+      alert("Format file tidak didukung. Gunakan Excel atau CSV.");
       return;
     }
 
@@ -125,12 +147,12 @@ function COA() {
       setLoading(true);
       await importCOA(formData);
       alert("Berhasil mengimpor data Excel!");
-      await loadData(); // Memuat ulang data agar tabel langsung ter-update
+      await loadData();
     } catch (err) {
-      alert("Gagal mengimpor file Excel. Periksa kembali format file atau backend.");
+      alert(err.message || "Gagal mengimpor file Excel.");
     } finally {
       setLoading(false);
-      e.target.value = ""; // Reset input file
+      e.target.value = "";
     }
   }
 
@@ -186,9 +208,7 @@ function COA() {
               <p>Kelola data kebutuhan untuk penyelenggaraan acara.</p>
             </div>
 
-            {/* Tombol Aksi di Kanan (Import Excel & Tambah COA) */}
             <div style={{ display: "flex", gap: "10px" }}>
-              {/* Input file tersembunyi */}
               <input
                 type="file"
                 ref={fileInputRef}
@@ -197,7 +217,6 @@ function COA() {
                 onChange={handleFileChange}
               />
 
-              {/* Tombol Import Excel */}
               <button
                 className="add-button"
                 style={{ backgroundColor: "#107c41" }}
@@ -206,7 +225,6 @@ function COA() {
                 <span>📊</span> Import Excel
               </button>
 
-              {/* Tombol Tambah COA */}
               <button className="add-button" onClick={openAddModal}>
                 <span>+</span> Tambah COA
               </button>
@@ -232,7 +250,7 @@ function COA() {
                 <span>⌕</span>
                 <input
                   type="text"
-                  placeholder="Cari ID atau nama COA..."
+                  placeholder="Cari kode, nama, kategori COA..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -245,8 +263,10 @@ function COA() {
               <table>
                 <thead>
                   <tr>
-                    <th>ID COA</th>
+                    <th>Kode COA</th>
                     <th>Nama COA</th>
+                    <th>Kategori Akun</th>
+                    <th>Sub Kategori Akun</th>
                     <th>Deskripsi</th>
                     <th>Status</th>
                     <th className="action-column">Aksi</th>
@@ -256,13 +276,13 @@ function COA() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan="5" className="empty-state">
+                      <td colSpan="7" className="empty-state">
                         Memuat data...
                       </td>
                     </tr>
                   ) : filteredData.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="empty-state">
+                      <td colSpan="7" className="empty-state">
                         {search
                           ? "Data COA tidak ditemukan."
                           : "Belum ada data COA. Klik Tambah COA untuk mulai mengisi."}
@@ -271,18 +291,34 @@ function COA() {
                   ) : (
                     filteredData.map((item) => (
                       <tr key={item.id}>
-                        <td className="coa-code">{item.kode_coa}</td>
-                        <td className="coa-name">{item.nama_coa}</td>
+                        <td className="coa-code">
+                          {item.kode_coa || "-"}
+                        </td>
+
+                        <td className="coa-name">
+                          {item.nama_coa}
+                        </td>
+
+                        <td>{item.kategori_akun || "-"}</td>
+
+                        <td>{item.sub_kategori_akun || "-"}</td>
+
                         <td>{item.deskripsi || "-"}</td>
+
                         <td>
                           <span
                             className={`status-badge ${
-                              item.status === 1 ? "status-active" : "status-inactive"
+                              item.status === 1
+                                ? "status-active"
+                                : "status-inactive"
                             }`}
                           >
-                            {item.status === 1 ? "Aktif" : "Tidak Aktif"}
+                            {item.status === 1
+                              ? "Aktif"
+                              : "Tidak Aktif"}
                           </span>
                         </td>
+
                         <td className="action-buttons">
                           <button
                             className="edit-button"
@@ -290,6 +326,7 @@ function COA() {
                           >
                             Edit
                           </button>
+
                           <button
                             className="delete-button"
                             onClick={() => handleDelete(item)}
@@ -312,8 +349,14 @@ function COA() {
       </main>
 
       {modalOpen && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setModalOpen(false)}
+        >
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <div>
                 <h2>{editId ? "Edit COA" : "Tambah COA"}</h2>
@@ -329,6 +372,16 @@ function COA() {
             </div>
 
             <form onSubmit={handleSubmit}>
+              <label>Kode COA</label>
+              <input
+                type="text"
+                placeholder="Masukkan kode COA"
+                value={kode}
+                onChange={(e) => setKode(e.target.value)}
+                required
+                autoFocus
+              />
+
               <label>Nama COA</label>
               <input
                 type="text"
@@ -336,7 +389,24 @@ function COA() {
                 value={nama}
                 onChange={(e) => setNama(e.target.value)}
                 required
-                autoFocus
+              />
+
+              <label>Kategori Akun</label>
+              <input
+                type="text"
+                placeholder="Masukkan kategori akun"
+                value={kategoriAkun}
+                onChange={(e) => setKategoriAkun(e.target.value)}
+                required
+              />
+
+              <label>Sub Kategori Akun</label>
+              <input
+                type="text"
+                placeholder="Masukkan sub kategori akun"
+                value={subKategoriAkun}
+                onChange={(e) => setSubKategoriAkun(e.target.value)}
+                required
               />
 
               <label>Deskripsi</label>
@@ -352,7 +422,9 @@ function COA() {
                   <label>Status</label>
                   <select
                     value={status}
-                    onChange={(e) => setStatus(Number(e.target.value))}
+                    onChange={(e) =>
+                      setStatus(Number(e.target.value))
+                    }
                   >
                     <option value={1}>Aktif</option>
                     <option value={0}>Tidak Aktif</option>
