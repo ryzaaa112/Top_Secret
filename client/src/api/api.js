@@ -47,3 +47,32 @@ export async function importCOA(formData) {
   if (!response.ok) throw new Error("Gagal mengimpor file Excel");
   return response.json();
 }
+
+export async function getKegiatanCOA() {
+  const response = await fetch(`${API_URL}/kegiatan-coa`);
+  if (!response.ok) throw new Error("Gagal mengambil data Input COA");
+  return response.json();
+}
+
+export async function addKegiatanCOA(data) {
+  const response = await fetch(`${API_URL}/kegiatan-coa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || "Gagal menyimpan Input COA");
+  }
+  return response.json();
+}
+
+export async function deleteKegiatanCOA(id) {
+  const response = await fetch(`${API_URL}/kegiatan-coa/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) throw new Error("Gagal menghapus data Input COA");
+  return response.json();
+}

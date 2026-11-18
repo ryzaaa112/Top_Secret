@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { Link } from "react-router-dom";
 import {
   getCOA,
   addCOA,
@@ -172,10 +173,23 @@ function COA() {
             Dashboard
           </div>
 
-          <div className="menu-item active">
+          <Link
+            to="/"
+            className="menu-item active"
+            style={{ textDecoration: "none" }}
+          >
             <span className="menu-icon">▤</span>
             Master COA
-          </div>
+          </Link>
+
+          <Link
+            to="/input-coa"
+            className="menu-item"
+            style={{ textDecoration: "none" }}
+          >
+            <span className="menu-icon">✎</span>
+            Input COA
+          </Link>
         </div>
 
         <div className="sidebar-bottom">

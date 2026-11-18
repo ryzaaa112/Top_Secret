@@ -351,6 +351,133 @@ app.delete("/api/coa/:id", (req, res) => {
   }
 });
 
+// GET: Mengambil semua data Kegiatan beserta rincian COA-nya
+app.get("/api/kegiatan-coa", (req, res) => {
+  try {
+    const kegiatanList = db
+      .prepare("SELECT * FROM kegiatan_coa ORDER BY id DESC")
+      .all();
+
+    const getItemsStmt = db.prepare(`
+      SELECT id, kode_coa, qty, harga_satuan, frekuensi, subtotal
+      FROM kegiatan_coa_items
+      WHERE kegiatan_id = ?
+    `);
+
+    const result = kegiatanList.map((kegiatan) => ({
+      ...kegiatan,
+      items: getItemsStmt.all(kegiatan.id),
+    }));
+
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Gagal mengambil data Input COA" });
+  }
+});
+
+// POST: Menyimpan Kegiatan baru beserta daftar item COA
+app.post("/api/kegiatan-coa", (req, res) => {
+  try {
+    const bidang = cleanText(req.body.bidang);
+    const nama_kegiatan = cleanText(req.body.nama_kegiatan);
+    const rutin_non_rutin = cleanText(req.body.rutin_non_rutin);
+    const tipe_transaksi = cleanText(req.body.tipe_transaksi);
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+
+    if (!bidang || !nama_kegiatan || !rutin_non_rutin || !tipe_transaksi) {
+      return res.status(400).json({
+        message: "Semua kolom Informasi Kegiatan wajib diisi.",
+      });
+    }
+
+    if (items.length === 0) {
+      return res.status(400).json({
+        message: "Minimal harus ada 1 baris COA.",
+      });
+    }
+
+    let totalKeseluruhan = 0;
+    const parsedItems = items.map((item) => {
+      const kode_coa = cleanText(item.kode_coa);
+      if (!kode_coa) {
+        throw new Error("Semua baris wajib diisi ID COA (Manual Code).");
+      }
+      const qty = Number(item.qty) || 0;
+      const harga_satuan = Number(item.harga_satuan) || 0;
+      const frekuensi = Number(item.frekuensi) || 0;
+      const subtotal = qty * harga_satuan * frekuensi;
+      totalKeseluruhan += subtotal;
+
+      return { kode_coa, qty, harga_satuan, frekuensi, subtotal };
+    });
+
+    const insertHeader = db.prepare(`
+      INSERT INTO kegiatan_coa (
+        bidang, nama_kegiatan, rutin_non_rutin, tipe_transaksi, total_keseluruhan
+      )
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const insertItem = db.prepare(`
+      INSERT INTO kegiatan_coa_items (
+        kegiatan_id, kode_coa, qty, harga_satuan, frekuensi, subtotal
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    const saveTransaction = db.transaction(() => {
+      const headerResult = insertHeader.run(
+        bidang,
+        nama_kegiatan,
+        rutin_non_rutin,
+        tipe_transaksi,
+        totalKeseluruhan
+      );
+      const kegiatanId = headerResult.lastInsertRowid;
+
+      for (const item of parsedItems) {
+        insertItem.run(
+          kegiatanId,
+          item.kode_coa,
+          item.qty,
+          item.harga_satuan,
+          item.frekuensi,
+          item.subtotal
+        );
+      }
+
+      return kegiatanId;
+    });
+
+    const newId = saveTransaction();
+    res.status(201).json({ id: newId, message: "Data berhasil disimpan!" });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({
+      message: error.message || "Gagal menyimpan data Input COA",
+    });
+  }
+});
+
+// DELETE: Menghapus data Kegiatan COA
+app.delete("/api/kegiatan-coa/:id", (req, res) => {
+  try {
+    const result = db
+      .prepare("DELETE FROM kegiatan_coa WHERE id = ?")
+      .run(Number(req.params.id));
+
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Data tidak ditemukan" });
+    }
+
+    res.json({ message: "Data berhasil dihapus" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Gagal menghapus data" });
+  }
+});
+
 const PORT = 3001;
 
 app.listen(PORT, () => {
